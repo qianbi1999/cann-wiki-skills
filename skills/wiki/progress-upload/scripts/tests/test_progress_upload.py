@@ -3,6 +3,7 @@
 运行：
     cd skills/wiki/progress-upload/scripts && python -m unittest discover -s tests -p 'test_*.py'
 """
+import datetime
 import sys
 import unittest
 from pathlib import Path
@@ -10,7 +11,12 @@ from pathlib import Path
 # 让 `import progress_upload` 能在 tests/ 子目录下找到上一级的模块
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from progress_upload import derive_op, derive_run_id, short_display_path  # noqa: E402
+from progress_upload import (  # noqa: E402
+    derive_op,
+    derive_run_id,
+    resolve_upload_date,
+    short_display_path,
+)
 
 
 class DeriveOpTest(unittest.TestCase):
@@ -65,6 +71,19 @@ class ShortDisplayPathTest(unittest.TestCase):
 
     def test_empty_path(self):
         self.assertEqual(short_display_path(""), "")
+
+
+class ResolveUploadDateTest(unittest.TestCase):
+    def test_valid_date_kept(self):
+        self.assertEqual(resolve_upload_date("2026-06-04"), "2026-06-04")
+
+    def test_none_defaults_to_today(self):
+        self.assertEqual(resolve_upload_date(None), datetime.date.today().isoformat())
+
+    def test_invalid_date_defaults_to_today(self):
+        today = datetime.date.today().isoformat()
+        for bad in ("", "2026/06/04", "20260604", "../../etc"):
+            self.assertEqual(resolve_upload_date(bad), today)
 
 
 if __name__ == "__main__":

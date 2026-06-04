@@ -40,9 +40,16 @@ elif command -v opencode >/dev/null 2>&1 \
      && opencode session list -n 1 --format json 2>/dev/null | jq -e '.[0].id' >/dev/null 2>&1; then
   AGENT=opencode
 else
-  ENC_CWD="$(pwd | sed 's|/|-|g')"
+  # Claude Code 把 cwd 编码成项目目录名时, 同时把 `/` 和 `_` 都替换成 `-`
+  # (例: /mnt/ws/claude_code/x → -mnt-ws-claude-code-x), 故 sed 要同时替换两者。
+  ENC_CWD="$(pwd | sed 's/[/_]/-/g')"
   CC_DIR="$HOME/.claude/projects/$ENC_CWD"
-  if [ -d "$CC_DIR" ] && ls "$CC_DIR"/*.jsonl >/dev/null 2>&1; then
+  # 兜底: 编码规则有其他边角 (如 `.`) 时按 basename 反查
+  if [ ! -d "$CC_DIR" ]; then
+    CC_DIR=$(find "$HOME/.claude/projects" -maxdepth 1 -type d \
+             -name "*$(basename "$(pwd)")" 2>/dev/null | head -1)
+  fi
+  if [ -n "$CC_DIR" ] && [ -d "$CC_DIR" ] && ls "$CC_DIR"/*.jsonl >/dev/null 2>&1; then
     AGENT=claude-code
   else
     echo "No supported agent transcript found"; exit 1
@@ -66,8 +73,14 @@ SKILL_DIR="<在 'Base directory for this skill:' 处显示的绝对路径>"
 ## Step 2A：Claude Code 路径
 
 ```bash
-ENC_CWD="$(pwd | sed 's|/|-|g')"
+# Claude Code 编码 cwd 时把 `/` 和 `_` 都替换成 `-`, 故 sed 要同时替换两者。
+ENC_CWD="$(pwd | sed 's/[/_]/-/g')"
 CC_DIR="$HOME/.claude/projects/$ENC_CWD"
+# 兜底: 编码有其他边角时按 basename 反查项目目录
+if [ ! -d "$CC_DIR" ]; then
+  CC_DIR=$(find "$HOME/.claude/projects" -maxdepth 1 -type d \
+           -name "*$(basename "$(pwd)")" 2>/dev/null | head -1)
+fi
 LATEST=$(ls -t "$CC_DIR"/*.jsonl 2>/dev/null | head -1)
 SESSION_ID=$(basename "$LATEST" .jsonl)
 
@@ -93,7 +106,9 @@ MCP 工具签名就是这样：
 wiki_submit_trajectory(session_id: str, content: str) -> dict
 ```
 
-Server 把字节原样落到 `<trajectory.uploaded_dir>/{session_id}.md`（路径来自 server 的 `config.yaml`）；下游的脱敏和抽取由 knowledge engine 的 monitor 进程负责。
+Server 把字节原样落到 `<trajectory.uploaded_dir>/<上传日期>/{session_id}.md`（**按上传当天 `YYYY-MM-DD` 分目录归档**，路径来自 server 的 `config.yaml`）；下游的脱敏和抽取由 knowledge engine 的 monitor 进程负责。
+
+**按日期分目录**：`mcp_upload.py` 默认取本机当天日期作为子目录前缀（`--date` 缺省即今天），**无需手动传**；同一天上传的轨迹自动汇总到同一个日期目录下。需要回填到指定日期时用 `--date YYYY-MM-DD`（server 端再校验，非法/缺省回退到 server 当天）。
 
 **按平台加前缀**：为区分两端来源，上传文件名按平台加前缀 —— Claude Code → `claudecode-{session_id}.md`，OpenCode → `opencode-{session_id}.md`。前缀由 `mcp_upload.py` 的 `--agent` 参数统一施加（幂等：已带前缀不会重复叠加），**不要**自己手动改 `SESSION_ID`。
 
@@ -107,7 +122,7 @@ python3 "$SKILL_DIR/scripts/mcp_upload.py" --file /tmp/session_output.md --sessi
 
 `--agent` 取 Step 1 检测出的 `$AGENT`（`claude-code` 或 `opencode`），脚本据此给落盘文件名加 `claudecode-` / `opencode-` 前缀。
 
-成功时输出一行：`OK <末级目录>/<文件名>`（如 `OK uploaded/claudecode-xxx.md`）—— 脚本只回显末级目录加文件名，**不暴露完整绝对路径**。Server 报错或返回意外响应时，脚本原样打印 server payload 并以非零退出码退出 —— 原样转给用户，不要改写。
+成功时输出一行：`OK <末级目录>/<文件名>`（如 `OK 2026-06-04/claudecode-xxx.md`，末级目录即上传日期）—— 脚本只回显末级目录加文件名，**不暴露完整绝对路径**。Server 报错或返回意外响应时，脚本原样打印 server payload 并以非零退出码退出 —— 原样转给用户，不要改写。
 
 脚本按以下优先级解析 MCP URL：`--url` 参数 > `$CANN_WIKI_MCP_URL` > agent MCP 配置（向上层目录找 `.mcp.json` / `.opencode/opencode.json` 里 `cann-wiki` 条目的 `url`，再退到 `~/.claude.json`）> 默认 `http://113.46.4.206:8767/mcp`。
 
@@ -125,8 +140,8 @@ python3 "$SKILL_DIR/scripts/mcp_upload.py" --file /tmp/session_output.md --sessi
 ✓ Uploaded
 - Agent:   claude-code | opencode
 - Session: {session_id}
-- Path:    uploaded/claudecode-{session_id}.md | uploaded/opencode-{session_id}.md
-           （只展示 `<末级目录>/<文件名>`，**不显示完整绝对路径**；文件名前缀按平台，见 Step 3）
+- Path:    {上传日期}/claudecode-{session_id}.md | {上传日期}/opencode-{session_id}.md
+           （只展示 `<末级目录>/<文件名>`，末级目录=上传日期 `YYYY-MM-DD`，**不显示完整绝对路径**；文件名前缀按平台，见 Step 3）
 - Pipeline: knowledge_engine 自动脱敏 + 抽取
 ```
 
