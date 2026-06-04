@@ -24,8 +24,10 @@ This means setting a non-default port via `/setup-cann-wiki` is enough: the
 agent config that setup wrote is what this script reads when uploading.
 """
 import argparse
+import datetime
 import json
 import os
+import re
 import sys
 import urllib.request
 from urllib.error import HTTPError, URLError
@@ -35,6 +37,20 @@ _AGENT_PREFIXES = {
     "claude-code": "claudecode-",
     "opencode": "opencode-",
 }
+
+# Upload-date subdir format; server archives at <date>/<session_id>.md.
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def resolve_upload_date(date):
+    """Return a YYYY-MM-DD date-dir string: the given `date` if valid, else today.
+
+    The server re-validates and falls back to its own day on anything invalid,
+    so this only picks a sensible default (the client's upload day).
+    """
+    if date and _DATE_RE.match(date):
+        return date
+    return datetime.date.today().isoformat()
 
 
 def apply_agent_prefix(session_id, agent):
@@ -145,9 +161,16 @@ def main():
         default=None,
         help="MCP HTTP endpoint (default: $CANN_WIKI_MCP_URL > agent MCP config > http://113.46.4.206:8767/mcp)",
     )
+    p.add_argument(
+        "--date",
+        default=None,
+        help="Upload-date subdir YYYY-MM-DD; server archives at <date>/<session_id>.md "
+             "(default: today)",
+    )
     args = p.parse_args()
     args.url = _resolve_url(args.url)
     args.session_id = apply_agent_prefix(args.session_id, args.agent)
+    args.date = resolve_upload_date(args.date)
 
     with open(args.file, encoding="utf-8") as f:
         content = f.read()
@@ -189,7 +212,7 @@ def main():
         "method": "tools/call",
         "params": {
             "name": "wiki_submit_trajectory",
-            "arguments": {"session_id": args.session_id, "content": content},
+            "arguments": {"session_id": args.session_id, "content": content, "date": args.date},
         },
     }
     try:

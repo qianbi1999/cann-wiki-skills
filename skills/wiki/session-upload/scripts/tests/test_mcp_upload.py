@@ -3,6 +3,7 @@
 运行：
     cd skills/wiki/session-upload/scripts && python -m unittest discover -s tests -p 'test_*.py'
 """
+import datetime
 import sys
 import unittest
 from pathlib import Path
@@ -10,7 +11,11 @@ from pathlib import Path
 # 让 `import mcp_upload` 能在 tests/ 子目录下找到上一级的模块
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from mcp_upload import apply_agent_prefix, short_display_path  # noqa: E402
+from mcp_upload import (  # noqa: E402
+    apply_agent_prefix,
+    resolve_upload_date,
+    short_display_path,
+)
 
 
 class ApplyAgentPrefixTest(unittest.TestCase):
@@ -45,6 +50,19 @@ class ShortDisplayPathTest(unittest.TestCase):
 
     def test_empty_path(self):
         self.assertEqual(short_display_path(""), "")
+
+
+class ResolveUploadDateTest(unittest.TestCase):
+    def test_valid_date_kept(self):
+        self.assertEqual(resolve_upload_date("2026-06-04"), "2026-06-04")
+
+    def test_none_defaults_to_today(self):
+        self.assertEqual(resolve_upload_date(None), datetime.date.today().isoformat())
+
+    def test_invalid_date_defaults_to_today(self):
+        today = datetime.date.today().isoformat()
+        for bad in ("", "2026/06/04", "20260604", "../../etc"):
+            self.assertEqual(resolve_upload_date(bad), today)
 
 
 if __name__ == "__main__":

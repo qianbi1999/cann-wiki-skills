@@ -29,6 +29,7 @@ URL resolution order:
     `~/.claude.json`)  >  http://113.46.4.206:8767/mcp
 """
 import argparse
+import datetime
 import json
 import os
 import re
@@ -37,6 +38,19 @@ import urllib.request
 from urllib.error import HTTPError, URLError
 
 _RUN_RE = re.compile(r"run\d+", re.IGNORECASE)
+# Upload-date subdir format; server archives at <date>/<op>/<run_id>.progress.md.
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def resolve_upload_date(date):
+    """Return a YYYY-MM-DD date-dir string: the given `date` if valid, else today.
+
+    The server re-validates and falls back to its own day on anything invalid,
+    so this only picks a sensible default (the client's upload day).
+    """
+    if date and _DATE_RE.match(date):
+        return date
+    return datetime.date.today().isoformat()
 
 
 def derive_op(file_path, explicit_op=None):
@@ -160,11 +174,15 @@ def main():
                    help="Run id distinguishing multiple runs. Default: parent dir if it matches run<N>")
     p.add_argument("--url", default=None,
                    help="MCP HTTP endpoint (default: $CANN_WIKI_MCP_URL > agent MCP config > http://113.46.4.206:8767/mcp)")
+    p.add_argument("--date", default=None,
+                   help="Upload-date subdir YYYY-MM-DD; server archives at "
+                        "<date>/<op>/<run_id>.progress.md (default: today)")
     args = p.parse_args()
 
     op = derive_op(args.file, args.op)
     run_id = derive_run_id(args.file, args.run_id)
     url = _resolve_url(args.url)
+    date = resolve_upload_date(args.date)
 
     with open(args.file, encoding="utf-8") as f:
         content = f.read()
@@ -199,7 +217,7 @@ def main():
         sess["mcp-session-id"] = sid
         _post(url, sess, json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}))
 
-    arguments = {"op": op, "content": content}
+    arguments = {"op": op, "content": content, "date": date}
     if run_id:
         arguments["run_id"] = run_id
     call_req = {
